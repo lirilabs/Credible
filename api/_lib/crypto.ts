@@ -25,3 +25,4 @@ export function decrypt(p: any) {
   decipher.setAuthTag(Buffer.from(p.tag, "hex"));
   return decipher.update(p.data, "hex", "utf8") + decipher.final("utf8");
 }
+
