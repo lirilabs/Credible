@@ -16,12 +16,12 @@ export function encrypt(text: string) {
   };
 }
 
-export function decrypt(payload: any) {
+export function decrypt(p: any) {
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
     KEY,
-    Buffer.from(payload.iv, "hex")
+    Buffer.from(p.iv, "hex")
   );
-  decipher.setAuthTag(Buffer.from(payload.tag, "hex"));
-  return decipher.update(payload.data, "hex", "utf8") + decipher.final("utf8");
+  decipher.setAuthTag(Buffer.from(p.tag, "hex"));
+  return decipher.update(p.data, "hex", "utf8") + decipher.final("utf8");
 }
