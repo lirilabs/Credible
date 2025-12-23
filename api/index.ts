@@ -7,19 +7,15 @@ export default async function handler(req, res) {
   try {
     const { action } = req.query;
 
-    if (action === "post:create") {
+    if (action === "post:create")
       return res.json(await createPost(req.body));
-    }
 
-    if (action === "post:list") {
-      const posts = await listPosts();
-      return res.json(posts.map(publicPost));
-    }
+    if (action === "post:list")
+      return res.json((await listPosts()).map(publicPost));
 
     if (action === "admin:posts") {
       requireAdmin(req);
-      const posts = await listPosts();
-      return res.json(posts.map(adminPost));
+      return res.json((await listPosts()).map(adminPost));
     }
 
     if (action === "notify") {
@@ -32,4 +28,3 @@ export default async function handler(req, res) {
     res.status(500).json({ error: e.message });
   }
 }
-
