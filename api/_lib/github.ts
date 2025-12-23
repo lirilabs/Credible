@@ -47,17 +47,24 @@ export async function createPost(input: {
 }
 
 export async function listPosts() {
-  const res = await fetch(
-    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/data/posts`,
-    { headers: headers() }
-  );
+  const base = `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/data/posts`;
+
+  const res = await fetch(base, { headers: headers() });
+
+  // Folder not created yet → return empty list
+  if (!res.ok) return [];
 
   const months = await res.json();
+  if (!Array.isArray(months)) return [];
+
   const posts: any[] = [];
 
   for (const m of months) {
     const r = await fetch(m.url, { headers: headers() });
-    posts.push(...(await r.json()));
+    if (!r.ok) continue;
+
+    const files = await r.json();
+    if (Array.isArray(files)) posts.push(...files);
   }
 
   return posts;
