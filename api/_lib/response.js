@@ -14,19 +14,6 @@ export const adminPost = (p) => ({
   userId: p.userId,
   tags: Array.isArray(p.tags) ? p.tags : [],
   ts: p.ts,
-
-  // ✅ BACKWARD-SAFE DECRYPTION
-  text:
-    typeof p.text === "string"
-      ? p.text
-      : p.text && p.text.iv
-      ? decrypt(p.text)
-      : null,
-
-  image:
-    typeof p.image === "string"
-      ? p.image
-      : p.image && p.image.iv
-      ? decrypt(p.image)
-      : null
+  text: typeof p.text === "string" ? p.text : decrypt(p.text),
+  image: typeof p.image === "string" ? p.image : decrypt(p.image)
 });
