@@ -5,13 +5,20 @@ import { sendFCM } from "./_lib/fcm";
 
 export default async function handler(req, res) {
   try {
+    // Health check
+    if (!req.query || !req.query.action) {
+      return res.json({ status: "alive" });
+    }
+
     const { action } = req.query;
 
-    if (action === "post:create")
-      return res.json(await createPost(req.body));
-
-    if (action === "post:list")
+    if (action === "post:list") {
       return res.json((await listPosts()).map(publicPost));
+    }
+
+    if (action === "post:create") {
+      return res.json(await createPost(req.body));
+    }
 
     if (action === "admin:posts") {
       requireAdmin(req);
