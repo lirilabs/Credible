@@ -5,3 +5,4 @@ export function requireAdmin(req: any) {
     throw new Error("Forbidden");
   }
 }
+
