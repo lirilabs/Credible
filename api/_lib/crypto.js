@@ -1,27 +1,34 @@
 import crypto from "crypto";
-import { ENV } from "./env.js";
 
-const KEY = Buffer.from(ENV.SECRET_KEY, "hex");
+const SECRET = Buffer.from(process.env.SECRET_KEY, "hex");
 
 export function encrypt(text) {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", KEY, iv);
-  const encrypted = Buffer.concat([cipher.update(text), cipher.final()]);
-  const tag = cipher.getAuthTag();
+  const cipher = crypto.createCipheriv("aes-256-gcm", SECRET, iv);
+
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
 
   return {
     iv: iv.toString("hex"),
-    data: encrypted.toString("hex"),
-    tag: tag.toString("hex")
+    data: encrypted,
+    tag: cipher.getAuthTag().toString("hex")
   };
 }
 
-export function decrypt(p) {
+export function decrypt(obj) {
+  if (!obj?.iv) return obj;
+
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
-    KEY,
-    Buffer.from(p.iv, "hex")
+    SECRET,
+    Buffer.from(obj.iv, "hex")
   );
-  decipher.setAuthTag(Buffer.from(p.tag, "hex"));
-  return decipher.update(p.data, "hex", "utf8") + decipher.final("utf8");
+
+  decipher.setAuthTag(Buffer.from(obj.tag, "hex"));
+
+  let decrypted = decipher.update(obj.data, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+
+  return decrypted;
 }
