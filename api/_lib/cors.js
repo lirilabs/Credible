@@ -9,3 +9,5 @@ export function allowCORS(req, res) {
     "Content-Type, Authorization, x-admin-key"
   );
 }
+
+
