@@ -1,102 +1,86 @@
-import fetch from "node-fetch";
 import crypto from "crypto";
-import { ENV } from "./env.js";
-import { encrypt } from "./crypto.js";
 
-const API = "https://api.github.com";
+const {
+  GITHUB_OWNER,
+  GITHUB_REPO,
+  GITHUB_BRANCH,
+  GITHUB_TOKEN
+} = process.env;
 
-const headers = () => ({
-  Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
-  "User-Agent": "credible-serverless"
-});
+const GH_API = "https://api.github.com";
 
-/* ---------- CREATE ---------- */
-export async function createPost({ userId, text, imageRef, tags }) {
-  const id = crypto.randomUUID();
-  const month = new Date().toISOString().slice(0, 7);
-
-  const post = {
-    id,
-    userId,
-    text: encrypt(text),
-    image: encrypt(imageRef),
-    tags,
-    ts: Date.now()
+function headers() {
+  return {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json"
   };
-
-  const path = `data/posts/${month}/${id}.json`;
-
-  await writeFile(path, post);
-  return { id };
 }
 
-/* ---------- READ (ALL) ---------- */
+function b64(obj) {
+  return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
+}
+
+function postPath(ts) {
+  const d = new Date(ts);
+  return `posts/${d.getFullYear()}-${d.getMonth() + 1}/${crypto
+    .randomUUID()}.json`;
+}
+
+export async function createPost(data) {
+  const ts = Date.now();
+
+  const post = {
+    id: crypto.randomUUID(),
+    userId: data.userId,
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    ts,
+    text: data.text,
+    image: data.image || null
+  };
+
+  const path = postPath(ts);
+
+  const res = await fetch(`${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify({
+      message: `post: ${post.id}`,
+      content: b64(post),
+      branch: GITHUB_BRANCH
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error("GitHub write failed: " + err);
+  }
+
+  return { ok: true, path, post };
+}
+
 export async function listPosts() {
-  const base = `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/data/posts`;
-  const res = await fetch(base, { headers: headers() });
+  const res = await fetch(
+    `${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
+    { headers: headers() }
+  );
+
   if (!res.ok) return [];
 
-  const months = await res.json();
-  if (!Array.isArray(months)) return [];
-
+  const dirs = await res.json();
   const posts = [];
 
-  for (const m of months) {
-    const r = await fetch(m.url, { headers: headers() });
-    if (!r.ok) continue;
+  for (const dir of dirs) {
+    const filesRes = await fetch(dir.url, { headers: headers() });
+    if (!filesRes.ok) continue;
 
-    const files = await r.json();
-    if (Array.isArray(files)) posts.push(...files);
+    const files = await filesRes.json();
+    for (const f of files) {
+      if (!f.download_url) continue;
+      const raw = await fetch(f.download_url);
+      posts.push(await raw.json());
+    }
   }
 
   return posts;
-}
-
-/* ---------- UPDATE ---------- */
-export async function updatePost({ path, sha, newData }) {
-  await fetch(
-    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: "db:update",
-        content: Buffer.from(JSON.stringify(newData)).toString("base64"),
-        sha,
-        branch: ENV.GITHUB_BRANCH
-      })
-    }
-  );
-}
-
-/* ---------- DELETE ---------- */
-export async function deletePost({ path, sha }) {
-  await fetch(
-    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "DELETE",
-      headers: headers(),
-      body: JSON.stringify({
-        message: "db:delete",
-        sha,
-        branch: ENV.GITHUB_BRANCH
-      })
-    }
-  );
-}
-
-/* ---------- helper ---------- */
-async function writeFile(path, content) {
-  await fetch(
-    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: "db:create",
-        content: Buffer.from(JSON.stringify(content)).toString("base64"),
-        branch: ENV.GITHUB_BRANCH
-      })
-    }
-  );
 }
