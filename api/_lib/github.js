@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import fetch from "node-fetch";
 
 const {
   GITHUB_OWNER,
