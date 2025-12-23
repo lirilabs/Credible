@@ -1,63 +1,72 @@
 import fetch from "node-fetch";
+import crypto from "crypto";
+import { ENV } from "./env";
 import { encrypt } from "./crypto";
-import { setCache, getCache } from "./cache";
+import { getCache, setCache } from "./cache";
 
 const API = "https://api.github.com";
 
-export async function createPost(payload) {
-  const encrypted = encrypt(payload.text);
+function headers() {
+  return {
+    Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
+    "User-Agent": "credible-backend"
+  };
+}
+
+export async function createPost(input: {
+  userId: string;
+  text: string;
+  imageRef: string;
+  tags: string[];
+}) {
+  const id = crypto.randomUUID();
+  const month = new Date().toISOString().slice(0, 7);
+
   const post = {
-    id: crypto.randomUUID(),
-    userId: payload.userId,
-    text: encrypted,
-    image: encrypt(payload.imageRef),
-    tags: payload.tags,
-    ts: Date.now(),
+    id,
+    userId: input.userId,
+    text: encrypt(input.text),
+    image: encrypt(input.imageRef),
+    tags: input.tags,
+    ts: Date.now()
   };
 
-  const path = `data/posts/${new Date().toISOString().slice(0, 7)}/${post.id}.json`;
+  const path = `data/posts/${month}/${id}.json`;
 
-  await githubWrite(path, post);
-  setCache("posts", null); // invalidate
+  await fetch(
+    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
+    {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({
+        message: `db:add:${id}`,
+        content: Buffer.from(JSON.stringify(post)).toString("base64"),
+        branch: ENV.GITHUB_BRANCH
+      })
+    }
+  );
 
-  return { id: post.id };
+  setCache("posts", null);
+  return { id };
 }
 
 export async function listPosts() {
   const cached = getCache("posts");
   if (cached) return cached;
 
-  const files = await githubReadDir("data/posts");
-  setCache("posts", files, 60000);
+  const res = await fetch(
+    `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/data/posts`,
+    { headers: headers() }
+  );
 
-  return files;
-}
+  const months = await res.json();
+  const all: any[] = [];
 
-/* ---------- helpers ---------- */
+  for (const m of months) {
+    const r = await fetch(m.url, { headers: headers() });
+    all.push(...(await r.json()));
+  }
 
-async function githubWrite(path, content) {
-  const url = `${API}/repos/${process.env.GITHUB_REPO}/contents/${path}`;
-
-  await fetch(url, {
-    method: "PUT",
-    headers: auth(),
-    body: JSON.stringify({
-      message: `add ${path}`,
-      content: Buffer.from(JSON.stringify(content)).toString("base64"),
-      branch: process.env.GITHUB_BRANCH,
-    }),
-  });
-}
-
-async function githubReadDir(path) {
-  const url = `${API}/repos/${process.env.GITHUB_REPO}/contents/${path}`;
-  const res = await fetch(url, { headers: auth() });
-  return await res.json();
-}
-
-function auth() {
-  return {
-    Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-    "User-Agent": "trust-graph",
-  };
+  setCache("posts", all, 60000);
+  return all;
 }
