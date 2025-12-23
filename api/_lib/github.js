@@ -8,11 +8,7 @@ const {
   GITHUB_TOKEN
 } = process.env;
 
-const GH_API = "https://api.github.com";
-
-/* -------------------------------------------------- */
-/* Helpers                                            */
-/* -------------------------------------------------- */
+const GH = "https://api.github.com";
 
 function headers() {
   return {
@@ -22,7 +18,7 @@ function headers() {
   };
 }
 
-function toBase64JSON(obj) {
+function toBase64(obj) {
   return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
 }
 
@@ -31,122 +27,88 @@ function yearMonth(ts) {
   return `${d.getFullYear()}-${d.getMonth() + 1}`;
 }
 
-/* -------------------------------------------------- */
-/* IMAGE UPLOAD                                       */
-/* -------------------------------------------------- */
+/* ---------------- IMAGE UPLOAD ---------------- */
 
-/**
- * Uploads a base64 image into the SAME GitHub repo
- * Returns a public download URL
- */
 export async function uploadImage(base64, mime = "image/jpeg") {
-  if (!base64) return null;
-
-  const ext = mime.split("/")[1] || "jpg";
-  const ts = Date.now();
-  const folder = yearMonth(ts);
-  const filename = `${crypto.randomUUID()}.${ext}`;
-  const path = `assets/images/${folder}/${filename}`;
-
-  // Strip data:image/...;base64, prefix if present
-  const cleanBase64 = base64.includes(",")
+  const clean = base64.includes(",")
     ? base64.split(",")[1]
     : base64;
 
+  const ext = mime.split("/")[1] || "jpg";
+  const folder = yearMonth(Date.now());
+  const name = `${crypto.randomUUID()}.${ext}`;
+  const path = `assets/images/${folder}/${name}`;
+
   const res = await fetch(
-    `${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
     {
       method: "PUT",
       headers: headers(),
       body: JSON.stringify({
-        message: `image upload ${filename}`,
-        content: cleanBase64,
+        message: `image ${name}`,
+        content: clean,
         branch: GITHUB_BRANCH
       })
     }
   );
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error("Image upload failed: " + err);
-  }
+  if (!res.ok) throw new Error("Image upload failed");
 
   const json = await res.json();
-  return json.content.download_url; // 🔥 public link
+  return json.content.download_url;
 }
 
-/* -------------------------------------------------- */
-/* POST CREATE                                        */
-/* -------------------------------------------------- */
+/* ---------------- CREATE ---------------- */
 
 export async function createPost(body) {
-  if (!body?.userId || !body?.text) {
-    throw new Error("Missing required fields");
-  }
-
   const ts = Date.now();
   const id = crypto.randomUUID();
 
-  let imageUrl = null;
-
-  // 🔥 If image file provided → upload → get link
+  let image = null;
   if (body.imageBase64) {
-    imageUrl = await uploadImage(
-      body.imageBase64,
-      body.imageType || "image/jpeg"
-    );
+    image = await uploadImage(body.imageBase64, body.imageType);
   }
 
   const post = {
     id,
     userId: body.userId,
-    tags: Array.isArray(body.tags) ? body.tags : [],
-    ts,
     text: body.text,
-    image: imageUrl
+    tags: Array.isArray(body.tags) ? body.tags : [],
+    image,
+    ts
   };
 
   const folder = yearMonth(ts);
   const path = `posts/${folder}/${id}.json`;
 
   const res = await fetch(
-    `${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
     {
       method: "PUT",
       headers: headers(),
       body: JSON.stringify({
         message: `post ${id}`,
-        content: toBase64JSON(post),
+        content: toBase64(post),
         branch: GITHUB_BRANCH
       })
     }
   );
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error("Post write failed: " + err);
-  }
+  if (!res.ok) throw new Error("Post create failed");
 
-  return {
-    ok: true,
-    id,
-    image: imageUrl
-  };
+  return { ok: true, id };
 }
 
-/* -------------------------------------------------- */
-/* POST LIST (CRASH-PROOF)                            */
-/* -------------------------------------------------- */
+/* ---------------- READ ---------------- */
 
 export async function listPosts() {
-  const posts = [];
+  const out = [];
 
   const rootRes = await fetch(
-    `${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
     { headers: headers() }
   );
 
-  // No posts directory yet → empty DB
   if (!rootRes.ok) return [];
 
   const root = await rootRes.json();
@@ -159,32 +121,94 @@ export async function listPosts() {
     if (!filesRes.ok) continue;
 
     const files = await filesRes.json();
-    if (!Array.isArray(files)) continue;
-
-    for (const file of files) {
-      if (!file.download_url) continue;
-
+    for (const f of files) {
+      if (!f.download_url) continue;
       try {
-        const raw = await fetch(file.download_url);
-        const json = await raw.json();
-        posts.push(json);
-      } catch {
-        // Skip corrupted / partial files
-      }
+        const raw = await fetch(f.download_url);
+        out.push(await raw.json());
+      } catch {}
     }
   }
 
-  return posts;
+  return out;
 }
 
-/* -------------------------------------------------- */
-/* UPDATE / DELETE (INTENTIONALLY SAFE STUBS)         */
-/* -------------------------------------------------- */
+/* ---------------- UPDATE ---------------- */
 
-export async function updatePost() {
-  throw new Error("updatePost not implemented yet");
+export async function updatePost({ id, userId, text, isAdmin }) {
+  const root = await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
+    { headers: headers() }
+  ).then(r => r.json());
+
+  for (const dir of root) {
+    if (dir.type !== "dir") continue;
+
+    const files = await fetch(dir.url, { headers: headers() }).then(r => r.json());
+    for (const file of files) {
+      if (!file.name.startsWith(id)) continue;
+
+      const post = await fetch(file.download_url).then(r => r.json());
+
+      if (!isAdmin && post.userId !== userId) {
+        throw new Error("Not allowed");
+      }
+
+      post.text = text;
+      post.updatedAt = Date.now();
+
+      const res = await fetch(file.url, {
+        method: "PUT",
+        headers: headers(),
+        body: JSON.stringify({
+          message: `update ${id}`,
+          content: toBase64(post),
+          sha: file.sha,
+          branch: GITHUB_BRANCH
+        })
+      });
+
+      if (!res.ok) throw new Error("Update failed");
+      return { ok: true };
+    }
+  }
+
+  throw new Error("Post not found");
 }
 
-export async function deletePost() {
-  throw new Error("deletePost not implemented yet");
+/* ---------------- DELETE ---------------- */
+
+export async function deletePost({ id, userId, isAdmin }) {
+  const root = await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
+    { headers: headers() }
+  ).then(r => r.json());
+
+  for (const dir of root) {
+    if (dir.type !== "dir") continue;
+
+    const files = await fetch(dir.url, { headers: headers() }).then(r => r.json());
+    for (const file of files) {
+      if (!file.name.startsWith(id)) continue;
+
+      const post = await fetch(file.download_url).then(r => r.json());
+      if (!isAdmin && post.userId !== userId) {
+        throw new Error("Not allowed");
+      }
+
+      await fetch(file.url, {
+        method: "DELETE",
+        headers: headers(),
+        body: JSON.stringify({
+          message: `delete ${id}`,
+          sha: file.sha,
+          branch: GITHUB_BRANCH
+        })
+      });
+
+      return { ok: true };
+    }
+  }
+
+  throw new Error("Post not found");
 }
