@@ -1,6 +1,3 @@
-export function requireAdmin(req) {
-  const key = req.headers["x-admin-key"];
-  if (!key || key !== process.env.ADMIN_KEY) {
-    throw new Error("Unauthorized");
-  }
+export function isAdmin(req) {
+  return req.headers["x-admin-key"] === process.env.ADMIN_KEY;
 }
