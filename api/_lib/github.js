@@ -8,7 +8,7 @@ const {
   GITHUB_TOKEN
 } = process.env;
 
-const GH_API = "https://api.github.com";
+const GH = "https://api.github.com";
 
 function headers() {
   return {
@@ -18,70 +18,92 @@ function headers() {
   };
 }
 
-function b64(obj) {
-  return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
+function b64(data) {
+  return Buffer.from(JSON.stringify(data, null, 2)).toString("base64");
 }
 
 function postPath(ts) {
   const d = new Date(ts);
-  return `posts/${d.getFullYear()}-${d.getMonth() + 1}/${crypto
-    .randomUUID()}.json`;
+  return `posts/${d.getFullYear()}-${d.getMonth() + 1}/${crypto.randomUUID()}.json`;
 }
 
-export async function createPost(data) {
+/* ---------- CREATE ---------- */
+export async function createPost(body) {
   const ts = Date.now();
 
   const post = {
     id: crypto.randomUUID(),
-    userId: data.userId,
-    tags: Array.isArray(data.tags) ? data.tags : [],
+    userId: body.userId,
+    tags: Array.isArray(body.tags) ? body.tags : [],
     ts,
-    text: data.text,
-    image: data.image || null
+    text: body.text,
+    image: body.image ?? null
   };
 
   const path = postPath(ts);
 
-  const res = await fetch(`${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`, {
-    method: "PUT",
-    headers: headers(),
-    body: JSON.stringify({
-      message: `post: ${post.id}`,
-      content: b64(post),
-      branch: GITHUB_BRANCH
-    })
-  });
+  const res = await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+    {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({
+        message: `post ${post.id}`,
+        content: b64(post),
+        branch: GITHUB_BRANCH
+      })
+    }
+  );
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error("GitHub write failed: " + err);
+    throw new Error("GitHub write failed");
   }
 
-  return { ok: true, path, post };
+  return { ok: true, id: post.id };
 }
 
+/* ---------- READ ---------- */
 export async function listPosts() {
-  const res = await fetch(
-    `${GH_API}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
+  const posts = [];
+
+  const rootRes = await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
     { headers: headers() }
   );
 
-  if (!res.ok) return [];
+  if (!rootRes.ok) return [];
 
-  const dirs = await res.json();
-  const posts = [];
+  const root = await rootRes.json();
+  if (!Array.isArray(root)) return [];
 
-  for (const dir of dirs) {
+  for (const dir of root) {
+    if (dir.type !== "dir") continue;
+
     const filesRes = await fetch(dir.url, { headers: headers() });
     if (!filesRes.ok) continue;
 
     const files = await filesRes.json();
+    if (!Array.isArray(files)) continue;
+
     for (const f of files) {
       if (!f.download_url) continue;
-      const raw = await fetch(f.download_url);
-      posts.push(await raw.json());
+      try {
+        const raw = await fetch(f.download_url);
+        posts.push(await raw.json());
+      } catch {
+        // skip corrupted file
+      }
     }
   }
 
   return posts;
+}
+
+/* ---------- UPDATE / DELETE (STUB SAFE) ---------- */
+export async function updatePost() {
+  throw new Error("Not implemented yet");
+}
+
+export async function deletePost() {
+  throw new Error("Not implemented yet");
 }
