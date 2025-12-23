@@ -10,54 +10,95 @@ import { requireAdmin } from "./_lib/admin.js";
 import { sendFCM } from "./_lib/fcm.js";
 
 export default async function handler(req, res) {
-  // ✅ Apply CORS for EVERY request
+  // ✅ Global CORS
   allowCORS(req, res);
 
-  // ✅ Handle preflight
+  // ✅ Preflight
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
   try {
-    // Health check
-    if (!req.query?.action) {
-      return res.json({ status: "alive" });
+    const action = req.query?.action;
+
+    // ✅ Health check
+    if (!action) {
+      return res.status(200).json({ status: "alive" });
     }
 
-    const action = String(req.query.action);
+    /* -------------------- POSTS -------------------- */
 
     if (action === "post:list") {
-      return res.json((await listPosts()).map(publicPost));
+      const posts = await listPosts();
+      return res.status(200).json(posts.map(publicPost));
     }
 
     if (action === "post:create") {
-      return res.json(await createPost(req.body));
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
+      // 🔴 MUST be awaited (serverless critical)
+      const result = await createPost(req.body);
+
+      return res.status(200).json(result);
     }
 
     if (action === "post:update") {
       requireAdmin(req);
+
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       await updatePost(req.body);
-      return res.json({ ok: true });
+      return res.status(200).json({ ok: true });
     }
 
     if (action === "post:delete") {
       requireAdmin(req);
+
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       await deletePost(req.body);
-      return res.json({ ok: true });
+      return res.status(200).json({ ok: true });
     }
+
+    /* -------------------- ADMIN -------------------- */
 
     if (action === "admin:posts") {
       requireAdmin(req);
-      return res.json((await listPosts()).map(adminPost));
+
+      const posts = await listPosts();
+      return res.status(200).json(posts.map(adminPost));
     }
+
+    /* -------------------- NOTIFICATIONS -------------------- */
 
     if (action === "notify") {
-      await sendFCM(req.body.token, req.body.title, req.body.body);
-      return res.json({ ok: true });
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
+      const { token, title, body } = req.body || {};
+
+      if (!token || !title || !body) {
+        return res.status(400).json({ error: "Missing fields" });
+      }
+
+      await sendFCM(token, title, body);
+      return res.status(200).json({ ok: true });
     }
 
+    /* -------------------- FALLBACK -------------------- */
+
     return res.status(404).json({ error: "Invalid action" });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("API ERROR:", err);
+    return res.status(500).json({
+      error: err.message || "Internal Server Error"
+    });
   }
 }
