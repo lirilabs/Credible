@@ -2,10 +2,12 @@ import fetch from "node-fetch";
 import jwt from "jsonwebtoken";
 import { ENV } from "./env";
 
-async function accessToken() {
+export async function sendFCM(token: string, title: string, body: string) {
+  if (!ENV.FCM_PRIVATE_KEY) return;
+
   const now = Math.floor(Date.now() / 1000);
 
-  const token = jwt.sign(
+  const jwtToken = jwt.sign(
     {
       iss: ENV.FCM_CLIENT_EMAIL,
       scope: "https://www.googleapis.com/auth/firebase.messaging",
@@ -20,21 +22,17 @@ async function accessToken() {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${token}`
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwtToken}`
   });
 
-  return (await res.json()).access_token;
-}
-
-export async function sendFCM(token: string, title: string, body: string) {
-  const access = await accessToken();
+  const { access_token } = await res.json();
 
   await fetch(
     `https://fcm.googleapis.com/v1/projects/${ENV.FCM_PROJECT_ID}/messages:send`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${access}`,
+        Authorization: `Bearer ${access_token}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
