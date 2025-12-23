@@ -1,6 +1,7 @@
 import crypto from "crypto";
+import { ENV } from "./env";
 
-const KEY = Buffer.from(process.env.SECRET_KEY, "hex");
+const KEY = Buffer.from(ENV.SECRET_KEY, "hex");
 
 export function encrypt(text: string) {
   const iv = crypto.randomBytes(12);
@@ -11,17 +12,16 @@ export function encrypt(text: string) {
   return {
     iv: iv.toString("hex"),
     data: encrypted.toString("hex"),
-    tag: tag.toString("hex"),
+    tag: tag.toString("hex")
   };
 }
 
-export function decryptPayload(payload) {
+export function decrypt(payload: any) {
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
     KEY,
     Buffer.from(payload.iv, "hex")
   );
   decipher.setAuthTag(Buffer.from(payload.tag, "hex"));
-
   return decipher.update(payload.data, "hex", "utf8") + decipher.final("utf8");
 }
