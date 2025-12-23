@@ -1,4 +1,4 @@
-const required = [
+const REQUIRED = [
   "GITHUB_OWNER",
   "GITHUB_REPO",
   "GITHUB_BRANCH",
@@ -10,9 +10,9 @@ const required = [
   "FCM_PRIVATE_KEY"
 ];
 
-for (const key of required) {
-  if (!process.env[key]) {
-    throw new Error(`Missing env: ${key}`);
+for (const k of REQUIRED) {
+  if (!process.env[k]) {
+    throw new Error(`Missing env: ${k}`);
   }
 }
 
