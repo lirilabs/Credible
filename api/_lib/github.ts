@@ -2,16 +2,13 @@ import fetch from "node-fetch";
 import crypto from "crypto";
 import { ENV } from "./env";
 import { encrypt } from "./crypto";
-import { getCache, setCache } from "./cache";
 
 const API = "https://api.github.com";
 
-function headers() {
-  return {
-    Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
-    "User-Agent": "credible-backend"
-  };
-}
+const headers = () => ({
+  Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
+  "User-Agent": "credible-serverless"
+});
 
 export async function createPost(input: {
   userId: string;
@@ -46,27 +43,22 @@ export async function createPost(input: {
     }
   );
 
-  setCache("posts", null);
   return { id };
 }
 
 export async function listPosts() {
-  const cached = getCache("posts");
-  if (cached) return cached;
-
   const res = await fetch(
     `${API}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/data/posts`,
     { headers: headers() }
   );
 
   const months = await res.json();
-  const all: any[] = [];
+  const posts: any[] = [];
 
   for (const m of months) {
     const r = await fetch(m.url, { headers: headers() });
-    all.push(...(await r.json()));
+    posts.push(...(await r.json()));
   }
 
-  setCache("posts", all, 60000);
-  return all;
+  return posts;
 }
