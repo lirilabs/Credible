@@ -4,11 +4,9 @@ import { isAdmin } from "./_lib/admin.js";
 import {
   createPost,
   listPosts,
-  updatePost,
-  deletePost,
 } from "./_lib/github.js";
 
-import { publicPost, adminPost } from "./_lib/response.js";
+import { publicPost } from "./_lib/response.js";
 import { sendFCM } from "./_lib/fcm.js";
 import { sendMail } from "./_lib/mail.js";
 
@@ -20,44 +18,13 @@ export default async function handler(req, res) {
     const action = req.query?.action;
     if (!action) return res.json({ status: "alive" });
 
-    /* ---------- POSTS ---------- */
-
     if (action === "post:list") {
       return res.json((await listPosts()).map(publicPost));
     }
 
     if (action === "post:create") {
-      const result = await createPost(req.body);
-
-      if (req.body.fcmToken) {
-        await sendFCM({
-          token: req.body.fcmToken,
-          title: "Post created",
-          body: "Your post is live now",
-        });
-      }
-
-      return res.json(result);
+      return res.json(await createPost(req.body));
     }
-
-    if (action === "post:update") {
-      return res.json(
-        await updatePost({ ...req.body, isAdmin: isAdmin(req) })
-      );
-    }
-
-    if (action === "post:delete") {
-      return res.json(
-        await deletePost({ ...req.body, isAdmin: isAdmin(req) })
-      );
-    }
-
-    if (action === "admin:posts") {
-      if (!isAdmin(req)) throw new Error("Unauthorized");
-      return res.json((await listPosts()).map(adminPost));
-    }
-
-    /* ---------- NOTIFICATIONS ---------- */
 
     if (action === "notify:fcm") {
       if (!isAdmin(req)) throw new Error("Unauthorized");
