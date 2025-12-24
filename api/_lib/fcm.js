@@ -1,70 +1,106 @@
 import admin from "firebase-admin";
+import { ENV } from "./env.js";
 
 /* ======================================================
-   Firebase Admin Init (ONCE)
+   Firebase Admin Init (SAFE FOR SERVERLESS)
 ====================================================== */
 if (!admin.apps.length) {
+  if (
+    !ENV.FIREBASE_PROJECT_ID ||
+    !ENV.FIREBASE_CLIENT_EMAIL ||
+    !ENV.FIREBASE_PRIVATE_KEY
+  ) {
+    throw new Error("Missing Firebase environment variables");
+  }
+
   admin.initializeApp({
     credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+      projectId: ENV.FIREBASE_PROJECT_ID,
+      clientEmail: ENV.FIREBASE_CLIENT_EMAIL,
+      privateKey: ENV.FIREBASE_PRIVATE_KEY,
     }),
   });
 }
 
 /* ======================================================
-   INTERNAL FCM SENDER
+   FCM API (SERVERLESS ENDPOINT)
 ====================================================== */
-export async function sendFCM({
-  token,
-  title,
-  body,
-  imageUrl,
-  clickAction,
-  data = {},
-}) {
-  if (!token || !title || !body) {
-    throw new Error("token, title and body are required");
+export default async function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Only POST allowed" });
   }
 
-  const message = {
-    token,
-
-    notification: {
+  try {
+    const {
+      token,
       title,
       body,
-      ...(imageUrl ? { image: imageUrl } : {}),
-    },
+      imageUrl,
+      clickAction,
+      data = {},
+    } = req.body || {};
 
-    data: {
-      ...Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, String(v)])
-      ),
-      ...(clickAction ? { click_action: clickAction } : {}),
-    },
+    if (!token || !title || !body) {
+      return res.status(400).json({
+        error: "token, title and body are required",
+      });
+    }
 
-    android: {
-      priority: "high",
+    const message = {
+      token,
+
       notification: {
-        sound: "default",
-        channelId: "default",
-        ...(imageUrl ? { imageUrl } : {}),
-      },
-    },
-
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          mutableContent: true,
-        },
-      },
-      fcmOptions: {
+        title,
+        body,
         ...(imageUrl ? { image: imageUrl } : {}),
       },
-    },
-  };
 
-  return await admin.messaging().send(message);
+      data: {
+        ...Object.fromEntries(
+          Object.entries(data).map(([k, v]) => [k, String(v)])
+        ),
+        ...(clickAction ? { click_action: clickAction } : {}),
+      },
+
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "default",
+          ...(imageUrl ? { imageUrl } : {}),
+        },
+      },
+
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            mutableContent: true,
+          },
+        },
+        fcmOptions: {
+          ...(imageUrl ? { image: imageUrl } : {}),
+        },
+      },
+    };
+
+    const messageId = await admin.messaging().send(message);
+
+    return res.status(200).json({
+      success: true,
+      messageId,
+    });
+  } catch (err) {
+    console.error("FCM ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
 }
