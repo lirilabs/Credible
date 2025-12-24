@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import fetch from "node-fetch";
 import { ENV } from "./env.js";
 
@@ -7,55 +6,62 @@ const GH = "https://api.github.com";
 const headers = () => ({
   Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
   Accept: "application/vnd.github+json",
-  "Content-Type": "application/json",
-  "Cache-Control": "no-cache",
-  Pragma: "no-cache"
+  "Content-Type": "application/json"
 });
 
-const toBase64 = obj =>
-  Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
+/* ================= FIND POST ================= */
 
-function yearMonth(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+export async function findPostById(postId) {
+  const root = await fetch(
+    `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/posts?ref=${ENV.GITHUB_BRANCH}`,
+    { headers: headers() }
+  ).then(r => r.ok ? r.json() : []);
+
+  for (const dir of root) {
+    if (dir.type !== "dir") continue;
+
+    const files = await fetch(dir.url, { headers: headers() })
+      .then(r => r.ok ? r.json() : []);
+
+    for (const file of files) {
+      if (!file.name.startsWith(postId)) continue;
+
+      const content = await fetch(file.download_url).then(r => r.json());
+
+      // backward compatibility
+      content.comments ||= [];
+      content.points ||= [];
+
+      return { post: content, file };
+    }
+  }
+
+  throw new Error("Post not found");
 }
 
-/* ---------- CREATE ---------- */
+/* ================= SAVE POST ================= */
 
-export async function createPost(body) {
-  const ts = Date.now();
-  const id = crypto.randomUUID();
+export async function savePost({ post, file }) {
+  const encoded = Buffer.from(JSON.stringify(post, null, 2)).toString("base64");
 
-  const post = {
-    id,
-    userId: body.userId,
-    text: body.text,
-    image: body.image || null,
-    tags: body.tags || [],
-    comments: [],
-    points: [],
-    ts
-  };
-
-  const path = `posts/${yearMonth(ts)}/${id}.json`;
-
-  await fetch(`${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`, {
+  const res = await fetch(file.url, {
     method: "PUT",
     headers: headers(),
     body: JSON.stringify({
-      message: `post ${id}`,
-      content: toBase64(post),
+      message: "update post",
+      content: encoded,
+      sha: file.sha,
       branch: ENV.GITHUB_BRANCH
     })
   });
 
-  return { ok: true, id };
+  if (!res.ok) throw new Error("GitHub save failed");
 }
 
-/* ---------- READ (LIVE) ---------- */
+/* ================= LIST POSTS ================= */
 
 export async function listPosts() {
-  const out = [];
+  const posts = [];
 
   const root = await fetch(
     `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/posts?ref=${ENV.GITHUB_BRANCH}`,
@@ -69,18 +75,16 @@ export async function listPosts() {
       .then(r => r.ok ? r.json() : []);
 
     for (const f of files) {
-      if (!f.download_url) continue;
-
-      const post = await fetch(`${f.download_url}?t=${Date.now()}`)
-        .then(r => r.json());
-
-      // 🔒 BACKWARD COMPATIBILITY
-      post.comments ||= [];
-      post.points ||= [];
-
-      out.push(post);
+      try {
+        const post = await fetch(f.download_url).then(r => r.json());
+        post.comments ||= [];
+        post.points ||= [];
+        posts.push(post);
+      } catch {
+        // ignore corrupted files
+      }
     }
   }
 
-  return out;
+  return posts;
 }
