@@ -1,7 +1,12 @@
 import crypto from "crypto";
+import fetch from "node-fetch";
 import { ENV } from "./env.js";
 
 const GH = "https://api.github.com";
+
+/* ======================================================
+   HELPERS
+====================================================== */
 
 const headers = () => ({
   Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
@@ -13,101 +18,107 @@ const toBase64 = obj =>
   Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
 
 /* ======================================================
-   ADD POINT TO POST
+   ADD POINT TO POST (EVENT BASED)
 ====================================================== */
 
-export async function addPoint({
-  postId,
-  postOwnerId,
-  userId,
-}) {
+export async function addPoint({ postId, postOwnerId, userId }) {
   if (!postId || !postOwnerId || !userId) {
     throw new Error("postId, postOwnerId, userId required");
   }
 
-  // Prevent self-upvote
+  // ❌ Prevent self-vote
   if (postOwnerId === userId) {
     throw new Error("Cannot upvote your own post");
   }
 
-  const pointId = crypto.randomUUID();
   const ts = Date.now();
+  const pointId = crypto.randomUUID();
 
-  /* ---------------- STORE POINT EVENT ----------------
-     One file = one vote (prevents overwrite)
-  --------------------------------------------------- */
+  /* ---------------- ONE USER = ONE FILE ---------------- */
 
-  const path = `points/posts/${postId}/${userId}.json`;
+  const pointPath = `points/posts/${postId}/${userId}.json`;
+  const url = `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${pointPath}`;
 
-  const res = await fetch(
-    `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: `point ${pointId}`,
-        content: toBase64({
-          id: pointId,
-          postId,
-          from: userId,
-          to: postOwnerId,
-          ts,
-        }),
-        branch: ENV.GITHUB_BRANCH,
+  // 🔍 Check if already voted
+  const check = await fetch(`${url}?ref=${ENV.GITHUB_BRANCH}`, {
+    headers: headers(),
+  });
+
+  if (check.ok) {
+    return { ok: true, already: true };
+  }
+
+  /* ---------------- CREATE POINT EVENT ---------------- */
+
+  const create = await fetch(url, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify({
+      message: `point ${pointId}`,
+      content: toBase64({
+        id: pointId,
+        postId,
+        from: userId,
+        to: postOwnerId,
+        ts,
       }),
-    }
-  );
+      branch: ENV.GITHUB_BRANCH,
+    }),
+  });
 
-  if (!res.ok) {
-    // If file already exists → already voted
-    if (res.status === 422) {
-      throw new Error("Already voted");
-    }
-    throw new Error("Point add failed");
+  if (!create.ok) {
+    const err = await create.text();
+    throw new Error(`Point add failed: ${err}`);
   }
 
   /* ---------------- UPDATE USER TOTAL ---------------- */
 
-  await addUserPoints(postOwnerId, 1);
+  await incrementUserPoints(postOwnerId, 1);
 
   return { ok: true };
 }
 
 /* ======================================================
-   USER POINT TOTAL
+   USER POINT TOTAL (SHA SAFE)
 ====================================================== */
 
-async function addUserPoints(userId, delta) {
+async function incrementUserPoints(userId, delta) {
   const path = `points/users/${userId}.json`;
-  let current = { userId, points: 0 };
+  const url = `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`;
 
-  try {
-    const res = await fetch(
-      `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}?ref=${ENV.GITHUB_BRANCH}`,
-      { headers: headers() }
+  let data = { userId, points: 0 };
+  let sha = null;
+
+  // 🔍 Read existing
+  const res = await fetch(`${url}?ref=${ENV.GITHUB_BRANCH}`, {
+    headers: headers(),
+  });
+
+  if (res.ok) {
+    const json = await res.json();
+    sha = json.sha;
+    data = JSON.parse(
+      Buffer.from(json.content, "base64").toString("utf8")
     );
+  }
 
-    if (res.ok) {
-      const json = await res.json();
-      current = JSON.parse(
-        Buffer.from(json.content, "base64").toString()
-      );
-    }
-  } catch {}
+  data.points = Number(data.points || 0) + delta;
+  data.updatedAt = Date.now();
 
-  current.points += delta;
-  current.updatedAt = Date.now();
+  // 💾 Write back (SHA aware)
+  const save = await fetch(url, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify({
+      message: `points +${delta}`,
+      content: toBase64(data),
+      ...(sha ? { sha } : {}),
+      branch: ENV.GITHUB_BRANCH,
+    }),
+  });
 
-  await fetch(
-    `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: `points +${delta}`,
-        content: toBase64(current),
-        branch: ENV.GITHUB_BRANCH,
-      }),
-    }
-  );
+  if (!save.ok) {
+    const err = await save.text();
+    throw new Error(`User point update failed: ${err}`);
+  }
 }
