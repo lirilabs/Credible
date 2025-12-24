@@ -1,39 +1,15 @@
-/* ------------------------------------------------------
-   Normalize post (handles OLD + NEW data safely)
------------------------------------------------------- */
-export function normalizePost(p) {
+export function publicPost(p) {
   return {
     id: p.id,
     userId: p.userId,
-    text: p.text ?? "",
+    text: p.text,
     image: p.image || null,
     tags: Array.isArray(p.tags) ? p.tags : [],
     ts: p.ts,
-
-    // ✅ Ensure arrays always exist
+    updatedAt: p.updatedAt || p.ts,
     comments: Array.isArray(p.comments) ? p.comments : [],
-    points: Array.isArray(p.points) ? p.points : []
+    points: Array.isArray(p.points) ? p.points : [],
+    pointCount: (p.points || []).length,
+    commentCount: (p.comments || []).length
   };
-}
-
-/* ------------------------------------------------------
-   Public response (used for feed)
------------------------------------------------------- */
-export function publicPost(p) {
-  const post = normalizePost(p);
-
-  return {
-    ...post,
-
-    // ✅ Frontend-friendly extras
-    pointCount: post.points.length,
-    commentCount: post.comments.length
-  };
-}
-
-/* ------------------------------------------------------
-   Admin response (raw, editable)
------------------------------------------------------- */
-export function adminPost(p) {
-  return normalizePost(p);
 }
