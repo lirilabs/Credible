@@ -1,7 +1,7 @@
 import { allowCORS } from "./_lib/cors.js";
 import {
-  createPost,
   listPosts,
+  createPost,
   addComment,
   addPoint
 } from "./_lib/github.js";
@@ -16,8 +16,7 @@ export default async function handler(req, res) {
     if (!action) return res.json({ status: "alive" });
 
     if (action === "post:list") {
-      const since = Number(req.query.since || 0);
-      const posts = await listPosts(since);
+      const posts = await listPosts();
       return res.json(posts.map(publicPost));
     }
 
@@ -33,14 +32,9 @@ export default async function handler(req, res) {
       return res.json(await addPoint(req.body));
     }
 
-    if (action === "ping") {
-      return res.json({ ok: true, ts: Date.now() });
-    }
-
     return res.status(404).json({ error: "Invalid action", action });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: e.message });
   }
 }
-
