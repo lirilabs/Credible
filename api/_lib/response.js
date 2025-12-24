@@ -1,10 +1,14 @@
-export const publicPost = (p) => ({
-  id: p.id,
-  userId: p.userId,
-  tags: Array.isArray(p.tags) ? p.tags : [],
-  ts: p.ts,
-  text: p.text,
-  image: p.image
-});
+export function publicPost(p) {
+  return {
+    id: p.id,
+    userId: p.userId,
+    text: p.text,
+    tags: p.tags,
+    image: p.image,
+    ts: p.ts,
+  };
+}
 
-export const adminPost = publicPost;
+export function adminPost(p) {
+  return p;
+}
