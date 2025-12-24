@@ -18,167 +18,123 @@ function headers() {
   };
 }
 
-function toBase64(obj) {
-  return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
-}
-
-function yearMonth(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-/* ================= NORMALIZE (CRITICAL) ================= */
-
-function normalizePost(p) {
-  return {
-    ...p,
-    comments: Array.isArray(p.comments) ? p.comments : [],
-    points: Array.isArray(p.points) ? p.points : [],
-    updatedAt: p.updatedAt || p.ts
-  };
-}
-
-/* ================= LOAD ALL POSTS ================= */
-
-async function loadAllPosts() {
-  const out = [];
+/* ---------- LIST POSTS ---------- */
+export async function listPosts() {
+  const posts = [];
 
   const root = await fetch(
     `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
     { headers: headers() }
-  );
+  ).then(r => r.json());
 
-  if (!root.ok) return [];
-
-  const folders = await root.json();
-  if (!Array.isArray(folders)) return [];
-
-  for (const dir of folders) {
+  for (const dir of root) {
     if (dir.type !== "dir") continue;
 
-    const files = await fetch(dir.url, { headers: headers() }).then(r => r.json());
+    const files = await fetch(dir.url, { headers: headers() })
+      .then(r => r.json());
 
     for (const f of files) {
       if (!f.download_url) continue;
-      try {
-        const post = await fetch(f.download_url).then(r => r.json());
-        out.push(normalizePost(post));
-      } catch {}
+
+      const post = await fetch(f.download_url).then(r => r.json());
+
+      post.comments = Array.isArray(post.comments) ? post.comments : [];
+      post.points = Array.isArray(post.points) ? post.points : [];
+
+      // 🔐 CRITICAL
+      post._path = f.path;
+      post._sha = f.sha;
+
+      posts.push(post);
     }
   }
 
-  return out;
+  return posts;
 }
 
-/* ================= CREATE POST ================= */
-
+/* ---------- CREATE POST ---------- */
 export async function createPost(body) {
-  const ts = Date.now();
   const id = crypto.randomUUID();
+  const ts = Date.now();
 
-  const post = normalizePost({
+  const post = {
     id,
     userId: body.userId,
     text: body.text,
-    tags: Array.isArray(body.tags) ? body.tags : [],
     image: body.image || null,
-    ts,
-    updatedAt: ts
-  });
+    tags: body.tags || [],
+    comments: [],
+    points: [],
+    ts
+  };
 
-  const path = `posts/${yearMonth(ts)}/${id}.json`;
+  const folder = new Date(ts).toISOString().slice(0, 7);
+  const path = `posts/${folder}/${id}.json`;
 
-  const res = await fetch(
+  await fetch(
     `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
     {
       method: "PUT",
       headers: headers(),
       body: JSON.stringify({
         message: `post ${id}`,
-        content: toBase64(post),
+        content: Buffer.from(JSON.stringify(post, null, 2)).toString("base64"),
         branch: GITHUB_BRANCH
       })
     }
   );
 
-  if (!res.ok) throw new Error("Create failed");
   return { ok: true, id };
 }
 
-/* ================= LIST POSTS (REALTIME) ================= */
-
-export async function listPosts(since = 0) {
-  const posts = await loadAllPosts();
-  return posts.filter(p => (p.updatedAt || p.ts) > since);
-}
-
-/* ================= ADD COMMENT ================= */
-
+/* ---------- ADD COMMENT ---------- */
 export async function addComment({ postId, userId, text }) {
-  const posts = await loadAllPosts();
+  const posts = await listPosts();
+  const post = posts.find(p => p.id === postId);
+  if (!post) throw new Error("Post not found");
 
-  for (let post of posts) {
-    if (post.id !== postId) continue;
-
-    post = normalizePost(post);
-
-    post.comments.push({
-      id: crypto.randomUUID(),
-      userId,
-      text,
-      ts: Date.now()
-    });
-
-    post.updatedAt = Date.now();
-    return savePost(post);
-  }
-
-  throw new Error("Post not found");
-}
-
-/* ================= ADD POINT ================= */
-
-export async function addPoint({ postId, userId }) {
-  const posts = await loadAllPosts();
-
-  for (let post of posts) {
-    if (post.id !== postId) continue;
-
-    post = normalizePost(post);
-
-    if (!post.points.includes(userId)) {
-      post.points.push(userId);
-      post.updatedAt = Date.now();
-    }
-
-    return savePost(post);
-  }
-
-  throw new Error("Post not found");
-}
-
-/* ================= SAVE POST ================= */
-
-async function savePost(post) {
-  const folder = yearMonth(post.ts);
-  const path = `posts/${folder}/${post.id}.json`;
-
-  const meta = await fetch(
-    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}?ref=${GITHUB_BRANCH}`,
-    { headers: headers() }
-  ).then(r => r.json());
-
-  const res = await fetch(meta.url, {
-    method: "PUT",
-    headers: headers(),
-    body: JSON.stringify({
-      message: `update ${post.id}`,
-      content: toBase64(post),
-      sha: meta.sha,
-      branch: GITHUB_BRANCH
-    })
+  post.comments.push({
+    id: crypto.randomUUID(),
+    userId,
+    text,
+    ts: Date.now()
   });
 
-  if (!res.ok) throw new Error("Save failed");
+  await savePost(post);
   return { ok: true };
+}
+
+/* ---------- ADD POINT ---------- */
+export async function addPoint({ postId, userId }) {
+  const posts = await listPosts();
+  const post = posts.find(p => p.id === postId);
+  if (!post) throw new Error("Post not found");
+
+  if (!post.points.includes(userId)) {
+    post.points.push(userId);
+  }
+
+  await savePost(post);
+  return { ok: true };
+}
+
+/* ---------- SAVE POST (CORE FIX) ---------- */
+async function savePost(post) {
+  const clean = { ...post };
+  delete clean._path;
+  delete clean._sha;
+
+  await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${post._path}`,
+    {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({
+        message: `update ${post.id}`,
+        content: Buffer.from(JSON.stringify(clean, null, 2)).toString("base64"),
+        sha: post._sha,
+        branch: GITHUB_BRANCH
+      })
+    }
+  );
 }
