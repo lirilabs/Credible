@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import fetch from "node-fetch";
+import { normalizePost } from "./response.js";
 
 const {
   GITHUB_OWNER,
@@ -10,25 +11,15 @@ const {
 
 const GH = "https://api.github.com";
 
-/* ---------------- HELPERS ---------------- */
-
 function headers() {
   return {
     Authorization: `Bearer ${GITHUB_TOKEN}`,
-    Accept: "application/vnd.github+json",
-    "Content-Type": "application/json"
+    Accept: "application/vnd.github+json"
   };
 }
 
 function toBase64(obj) {
   return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
-}
-
-function normalizePost(post) {
-  if (!Array.isArray(post.comments)) post.comments = [];
-  if (!Array.isArray(post.points)) post.points = [];
-  if (!Array.isArray(post.tags)) post.tags = [];
-  return post;
 }
 
 async function getAllPostFiles() {
@@ -41,8 +32,8 @@ async function getAllPostFiles() {
 
   for (const dir of root || []) {
     if (dir.type !== "dir") continue;
-    const f = await fetch(dir.url, { headers: headers() }).then(r => r.json());
-    files.push(...f);
+    const list = await fetch(dir.url, { headers: headers() }).then(r => r.json());
+    for (const f of list || []) files.push(f);
   }
 
   return files;
@@ -50,31 +41,36 @@ async function getAllPostFiles() {
 
 /* ---------------- CREATE POST ---------------- */
 
-export async function createPost({ userId, text, tags = [], image = null }) {
+export async function createPost(body) {
   const id = crypto.randomUUID();
   const ts = Date.now();
 
-  const post = normalizePost({
+  const post = {
     id,
-    userId,
-    text,
-    tags,
-    image,
-    ts
-  });
+    userId: body.userId,
+    text: body.text,
+    tags: body.tags || [],
+    image: body.image || null,
+    ts,
+    comments: [],
+    points: []
+  };
 
-  const folder = new Date(ts).toISOString().slice(0, 7);
-  const path = `posts/${folder}/${id}.json`;
+  const ym = new Date(ts).toISOString().slice(0, 7);
+  const path = `posts/${ym}/${id}.json`;
 
-  await fetch(`${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`, {
-    method: "PUT",
-    headers: headers(),
-    body: JSON.stringify({
-      message: `post ${id}`,
-      content: toBase64(post),
-      branch: GITHUB_BRANCH
-    })
-  });
+  await fetch(
+    `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+    {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({
+        message: `post ${id}`,
+        content: toBase64(post),
+        branch: GITHUB_BRANCH
+      })
+    }
+  );
 
   return { ok: true, id };
 }
@@ -82,44 +78,38 @@ export async function createPost({ userId, text, tags = [], image = null }) {
 /* ---------------- LIST POSTS ---------------- */
 
 export async function listPosts() {
-  const files = await getAllPostFiles();
   const out = [];
+  const files = await getAllPostFiles();
 
   for (const f of files) {
     if (!f.download_url) continue;
     try {
-      let post = await fetch(f.download_url).then(r => r.json());
-      post = normalizePost(post);
-      out.push(post);
+      const p = await fetch(f.download_url).then(r => r.json());
+      out.push(normalizePost(p));
     } catch {}
   }
 
   return out;
 }
 
-/* ---------------- ADD COMMENT ---------------- */
+/* ---------------- ADD COMMENT (FIXED) ---------------- */
 
 export async function addComment({ postId, userId, text }) {
   const files = await getAllPostFiles();
 
   for (const f of files) {
-    if (!f.name.startsWith(postId)) continue;
+    const post = await fetch(f.download_url).then(r => r.json());
+    if (post.id !== postId) continue;
 
-    let post = await fetch(f.download_url).then(r => r.json());
-    post = normalizePost(post);
-
-    post.comments.push({
-      userId,
-      text,
-      ts: Date.now()
-    });
+    const fixed = normalizePost(post);
+    fixed.comments.push({ userId, text, ts: Date.now() });
 
     await fetch(f.url, {
       method: "PUT",
       headers: headers(),
       body: JSON.stringify({
         message: `comment ${postId}`,
-        content: toBase64(post),
+        content: toBase64(fixed),
         sha: f.sha,
         branch: GITHUB_BRANCH
       })
@@ -131,33 +121,29 @@ export async function addComment({ postId, userId, text }) {
   throw new Error("Post not found");
 }
 
-/* ---------------- ADD POINT ---------------- */
+/* ---------------- ADD POINT (FIXED) ---------------- */
 
 export async function addPoint({ postId, userId }) {
   const files = await getAllPostFiles();
 
   for (const f of files) {
-    if (!f.name.startsWith(postId)) continue;
+    const post = await fetch(f.download_url).then(r => r.json());
+    if (post.id !== postId) continue;
 
-    let post = await fetch(f.download_url).then(r => r.json());
-    post = normalizePost(post);
+    const fixed = normalizePost(post);
 
-    // prevent double voting
-    if (post.points.some(p => p.userId === userId)) {
+    if (fixed.points.some(p => p.userId === userId)) {
       return { ok: true, skipped: true };
     }
 
-    post.points.push({
-      userId,
-      ts: Date.now()
-    });
+    fixed.points.push({ userId, ts: Date.now() });
 
     await fetch(f.url, {
       method: "PUT",
       headers: headers(),
       body: JSON.stringify({
         message: `point ${postId}`,
-        content: toBase64(post),
+        content: toBase64(fixed),
         sha: f.sha,
         branch: GITHUB_BRANCH
       })
