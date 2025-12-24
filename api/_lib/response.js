@@ -6,7 +6,7 @@ export function publicPost(p) {
     image: p.image || null,
     tags: p.tags || [],
     ts: p.ts,
-    comments: p.comments || [],
-    points: p.points || []
+    comments: Array.isArray(p.comments) ? p.comments : [],
+    points: Array.isArray(p.points) ? p.points : []
   };
 }
