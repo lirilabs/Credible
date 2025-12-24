@@ -1,9 +1,4 @@
-/* 
-  GitHub Storage Layer
-  - Serverless safe
-  - Node runtime only
-  - No import-time env access
-*/
+/* GitHub storage – serverless safe */
 
 function getEnv() {
   return {
@@ -14,79 +9,55 @@ function getEnv() {
   };
 }
 
-function getHeaders() {
+function headers() {
   const { TOKEN } = getEnv();
   if (!TOKEN) throw new Error("GITHUB_TOKEN missing");
-
   return {
     Authorization: `Bearer ${TOKEN}`,
-    "Content-Type": "application/json",
-    "User-Agent": "vercel-serverless"
+    "User-Agent": "vercel",
+    "Content-Type": "application/json"
   };
 }
 
 const BASE = "https://api.github.com";
 
-/* ------------------ READ FILE ------------------ */
 export async function readFile(path) {
   const { OWNER, REPO, BRANCH } = getEnv();
-
-  if (!OWNER || !REPO) {
-    throw new Error("GITHUB_OWNER or GITHUB_REPO missing");
-  }
-
   const res = await fetch(
     `${BASE}/repos/${OWNER}/${REPO}/contents/${path}?ref=${BRANCH}`,
-    { headers: getHeaders() }
+    { headers: headers() }
   );
 
-  if (res.status === 404) {
-    return { content: null, sha: null };
-  }
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GitHub read failed: ${err}`);
-  }
+  if (res.status === 404) return { content: null, sha: null };
+  if (!res.ok) throw new Error(await res.text());
 
   const json = await res.json();
-
   return {
     content: Buffer.from(json.content, "base64").toString("utf8"),
     sha: json.sha
   };
 }
 
-/* ------------------ WRITE FILE ------------------ */
 export async function writeFile(path, content, sha) {
   const { OWNER, REPO, BRANCH } = getEnv();
 
-  if (!OWNER || !REPO) {
-    throw new Error("GITHUB_OWNER or GITHUB_REPO missing");
-  }
-
   const body = {
-    message: "serverless update",
+    message: "update",
     content: Buffer.from(content, "utf8").toString("base64"),
     branch: BRANCH
   };
 
-  // required for updates, optional for first write
   if (sha) body.sha = sha;
 
   const res = await fetch(
     `${BASE}/repos/${OWNER}/${REPO}/contents/${path}`,
     {
       method: "PUT",
-      headers: getHeaders(),
+      headers: headers(),
       body: JSON.stringify(body)
     }
   );
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GitHub write failed: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
