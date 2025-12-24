@@ -16,7 +16,8 @@ export default async function handler(req, res) {
     if (!action) return res.json({ status: "alive" });
 
     if (action === "post:list") {
-      return res.json((await listPosts()).map(publicPost));
+      const posts = await listPosts();
+      return res.json(posts.map(publicPost));
     }
 
     if (action === "post:create") {
