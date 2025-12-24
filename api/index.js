@@ -1,10 +1,10 @@
-export const config = {
-  runtime: "nodejs"
-};
+export const config = { runtime: "nodejs" };
+
+import "../_lib/env.js";
 
 export default function handler(req, res) {
   res.status(200).json({
     ok: true,
-    message: "BOOT OK - nodejs runtime"
+    message: "ENV OK"
   });
 }
