@@ -1,14 +1,12 @@
 import { allowCORS } from "./_lib/cors.js";
 import { isAdmin } from "./_lib/admin.js";
-
 import {
   createPost,
   listPosts,
+  updatePost,
+  deletePost
 } from "./_lib/github.js";
-
-import { publicPost } from "./_lib/response.js";
-import { sendFCM } from "./_lib/fcm.js";
-import { sendMail } from "./_lib/mail.js";
+import { publicPost, adminPost } from "./_lib/response.js";
 
 export default async function handler(req, res) {
   allowCORS(req, res);
@@ -26,22 +24,32 @@ export default async function handler(req, res) {
       return res.json(await createPost(req.body));
     }
 
-    if (action === "notify:fcm") {
-      if (!isAdmin(req)) throw new Error("Unauthorized");
-      const messageId = await sendFCM(req.body);
-      return res.json({ success: true, messageId });
+    if (action === "post:update") {
+      return res.json(
+        await updatePost({
+          ...req.body,
+          isAdmin: isAdmin(req)
+        })
+      );
     }
 
-    if (action === "notify:mail") {
+    if (action === "post:delete") {
+      return res.json(
+        await deletePost({
+          ...req.body,
+          isAdmin: isAdmin(req)
+        })
+      );
+    }
+
+    if (action === "admin:posts") {
       if (!isAdmin(req)) throw new Error("Unauthorized");
-      await sendMail(req.body);
-      return res.json({ success: true });
+      return res.json((await listPosts()).map(adminPost));
     }
 
     return res.status(404).json({ error: "Invalid action" });
-
   } catch (e) {
-    console.error("API ERROR:", e);
+    console.error(e);
     return res.status(500).json({ error: e.message });
   }
 }
