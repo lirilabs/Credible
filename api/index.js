@@ -1,10 +1,10 @@
 export const config = {
-  runtime: "nodejs18.x"
+  runtime: "nodejs"
 };
 
 export default function handler(req, res) {
   res.status(200).json({
     ok: true,
-    message: "BOOT OK"
+    message: "BOOT OK - nodejs runtime"
   });
 }
