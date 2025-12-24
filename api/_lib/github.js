@@ -1,6 +1,8 @@
-/* GitHub storage – serverless safe */
+/* _lib/github.js */
 
-function getEnv() {
+const BASE = "https://api.github.com";
+
+function env() {
   return {
     OWNER: process.env.GITHUB_OWNER,
     REPO: process.env.GITHUB_REPO,
@@ -10,26 +12,31 @@ function getEnv() {
 }
 
 function headers() {
-  const { TOKEN } = getEnv();
+  const { TOKEN } = env();
   if (!TOKEN) throw new Error("GITHUB_TOKEN missing");
+
   return {
     Authorization: `Bearer ${TOKEN}`,
-    "User-Agent": "vercel",
+    "User-Agent": "vercel-serverless",
     "Content-Type": "application/json"
   };
 }
 
-const BASE = "https://api.github.com";
-
 export async function readFile(path) {
-  const { OWNER, REPO, BRANCH } = getEnv();
+  const { OWNER, REPO, BRANCH } = env();
+
   const res = await fetch(
     `${BASE}/repos/${OWNER}/${REPO}/contents/${path}?ref=${BRANCH}`,
     { headers: headers() }
   );
 
-  if (res.status === 404) return { content: null, sha: null };
-  if (!res.ok) throw new Error(await res.text());
+  if (res.status === 404) {
+    return { content: "[]", sha: null };
+  }
+
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
 
   const json = await res.json();
   return {
@@ -39,11 +46,11 @@ export async function readFile(path) {
 }
 
 export async function writeFile(path, content, sha) {
-  const { OWNER, REPO, BRANCH } = getEnv();
+  const { OWNER, REPO, BRANCH } = env();
 
   const body = {
-    message: "update",
-    content: Buffer.from(content, "utf8").toString("base64"),
+    message: "update posts",
+    content: Buffer.from(content).toString("base64"),
     branch: BRANCH
   };
 
@@ -58,6 +65,9 @@ export async function writeFile(path, content, sha) {
     }
   );
 
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+
   return res.json();
 }
