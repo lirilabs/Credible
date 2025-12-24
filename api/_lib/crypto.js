@@ -1,43 +1,13 @@
-import crypto from "crypto";
-import { ENV } from "./env.js";
+export const ENV = {
+  GITHUB_OWNER: process.env.GITHUB_OWNER ?? null,
+  GITHUB_REPO: process.env.GITHUB_REPO ?? null,
+  GITHUB_BRANCH: process.env.GITHUB_BRANCH ?? null,
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null,
 
-if (!ENV.SECRET_KEY) {
-  throw new Error("SECRET_KEY is missing. Set it in Vercel environment variables.");
-}
+  SECRET_KEY: process.env.SECRET_KEY ?? null,
+  ADMIN_KEY: process.env.ADMIN_KEY ?? null,
 
-const KEY = crypto
-  .createHash("sha256")
-  .update(ENV.SECRET_KEY)
-  .digest(); // 32 bytes
-
-const ALGO = "aes-256-gcm";
-
-export function encrypt(data) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGO, KEY, iv);
-
-  const encrypted = Buffer.concat([
-    cipher.update(JSON.stringify(data), "utf8"),
-    cipher.final()
-  ]);
-
-  const tag = cipher.getAuthTag();
-
-  return Buffer.concat([iv, tag, encrypted]).toString("base64");
-}
-
-export function decrypt(payload) {
-  if (!payload) return null;
-
-  const buffer = Buffer.from(payload, "base64");
-  const iv = buffer.subarray(0, 12);
-  const tag = buffer.subarray(12, 28);
-  const content = buffer.subarray(28);
-
-  const decipher = crypto.createDecipheriv(ALGO, KEY, iv);
-  decipher.setAuthTag(tag);
-
-  return JSON.parse(
-    Buffer.concat([decipher.update(content), decipher.final()]).toString("utf8")
-  );
-}
+  FCM_PROJECT_ID: process.env.FCM_PROJECT_ID ?? null,
+  FCM_CLIENT_EMAIL: process.env.FCM_CLIENT_EMAIL ?? null,
+  FCM_PRIVATE_KEY: process.env.FCM_PRIVATE_KEY ?? null
+};
