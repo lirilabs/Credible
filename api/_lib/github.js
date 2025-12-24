@@ -27,37 +27,42 @@ function yearMonth(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-/* ------------------------------------------------
-   LOAD ALL POSTS
------------------------------------------------- */
+/* ================= NORMALIZE (CRITICAL) ================= */
+
+function normalizePost(p) {
+  return {
+    ...p,
+    comments: Array.isArray(p.comments) ? p.comments : [],
+    points: Array.isArray(p.points) ? p.points : [],
+    updatedAt: p.updatedAt || p.ts
+  };
+}
+
+/* ================= LOAD ALL POSTS ================= */
+
 async function loadAllPosts() {
   const out = [];
 
-  const rootRes = await fetch(
+  const root = await fetch(
     `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
     { headers: headers() }
   );
 
-  if (!rootRes.ok) return [];
+  if (!root.ok) return [];
 
-  const folders = await rootRes.json();
+  const folders = await root.json();
   if (!Array.isArray(folders)) return [];
 
   for (const dir of folders) {
     if (dir.type !== "dir") continue;
 
     const files = await fetch(dir.url, { headers: headers() }).then(r => r.json());
+
     for (const f of files) {
       if (!f.download_url) continue;
       try {
         const post = await fetch(f.download_url).then(r => r.json());
-
-        // 🔒 Normalize old posts
-        post.comments ??= [];
-        post.points ??= [];
-        post.updatedAt ??= post.ts;
-
-        out.push(post);
+        out.push(normalizePost(post));
       } catch {}
     }
   }
@@ -65,24 +70,21 @@ async function loadAllPosts() {
   return out;
 }
 
-/* ------------------------------------------------
-   CREATE POST
------------------------------------------------- */
+/* ================= CREATE POST ================= */
+
 export async function createPost(body) {
   const ts = Date.now();
   const id = crypto.randomUUID();
 
-  const post = {
+  const post = normalizePost({
     id,
     userId: body.userId,
     text: body.text,
     tags: Array.isArray(body.tags) ? body.tags : [],
     image: body.image || null,
     ts,
-    updatedAt: ts,
-    comments: [],
-    points: []
-  };
+    updatedAt: ts
+  });
 
   const path = `posts/${yearMonth(ts)}/${id}.json`;
 
@@ -103,22 +105,22 @@ export async function createPost(body) {
   return { ok: true, id };
 }
 
-/* ------------------------------------------------
-   LIST POSTS (REAL-TIME SUPPORT)
------------------------------------------------- */
+/* ================= LIST POSTS (REALTIME) ================= */
+
 export async function listPosts(since = 0) {
   const posts = await loadAllPosts();
   return posts.filter(p => (p.updatedAt || p.ts) > since);
 }
 
-/* ------------------------------------------------
-   ADD COMMENT
------------------------------------------------- */
+/* ================= ADD COMMENT ================= */
+
 export async function addComment({ postId, userId, text }) {
   const posts = await loadAllPosts();
 
-  for (const post of posts) {
+  for (let post of posts) {
     if (post.id !== postId) continue;
+
+    post = normalizePost(post);
 
     post.comments.push({
       id: crypto.randomUUID(),
@@ -128,21 +130,21 @@ export async function addComment({ postId, userId, text }) {
     });
 
     post.updatedAt = Date.now();
-
     return savePost(post);
   }
 
   throw new Error("Post not found");
 }
 
-/* ------------------------------------------------
-   ADD POINT
------------------------------------------------- */
+/* ================= ADD POINT ================= */
+
 export async function addPoint({ postId, userId }) {
   const posts = await loadAllPosts();
 
-  for (const post of posts) {
+  for (let post of posts) {
     if (post.id !== postId) continue;
+
+    post = normalizePost(post);
 
     if (!post.points.includes(userId)) {
       post.points.push(userId);
@@ -155,9 +157,8 @@ export async function addPoint({ postId, userId }) {
   throw new Error("Post not found");
 }
 
-/* ------------------------------------------------
-   SAVE POST
------------------------------------------------- */
+/* ================= SAVE POST ================= */
+
 async function savePost(post) {
   const folder = yearMonth(post.ts);
   const path = `posts/${folder}/${post.id}.json`;
