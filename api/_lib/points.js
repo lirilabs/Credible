@@ -1,8 +1,9 @@
-import crypto from "crypto";
-import { findPost, savePost } from "./comment.js";
+import { findPostById, savePost } from "./github.js";
 
 export async function addPoint({ postId, userId }) {
-  const { post, file } = await findPost(postId);
+  if (!postId || !userId) throw new Error("Invalid input");
+
+  const { post, file } = await findPostById(postId);
 
   post.points ||= [];
 
@@ -14,5 +15,6 @@ export async function addPoint({ postId, userId }) {
   post.updatedAt = Date.now();
 
   await savePost({ post, file });
+
   return { ok: true };
 }
