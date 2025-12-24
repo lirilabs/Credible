@@ -10,6 +10,8 @@ const {
 
 const GH = "https://api.github.com";
 
+/* ---------------- HELPERS ---------------- */
+
 function headers() {
   return {
     Authorization: `Bearer ${GITHUB_TOKEN}`,
@@ -22,6 +24,13 @@ function toBase64(obj) {
   return Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
 }
 
+function normalizePost(post) {
+  if (!Array.isArray(post.comments)) post.comments = [];
+  if (!Array.isArray(post.points)) post.points = [];
+  if (!Array.isArray(post.tags)) post.tags = [];
+  return post;
+}
+
 async function getAllPostFiles() {
   const root = await fetch(
     `${GH}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/posts?ref=${GITHUB_BRANCH}`,
@@ -29,11 +38,13 @@ async function getAllPostFiles() {
   ).then(r => r.json());
 
   const files = [];
-  for (const dir of root) {
+
+  for (const dir of root || []) {
     if (dir.type !== "dir") continue;
     const f = await fetch(dir.url, { headers: headers() }).then(r => r.json());
     files.push(...f);
   }
+
   return files;
 }
 
@@ -43,16 +54,14 @@ export async function createPost({ userId, text, tags = [], image = null }) {
   const id = crypto.randomUUID();
   const ts = Date.now();
 
-  const post = {
+  const post = normalizePost({
     id,
     userId,
     text,
     tags,
     image,
-    ts,
-    comments: [],
-    points: []
-  };
+    ts
+  });
 
   const folder = new Date(ts).toISOString().slice(0, 7);
   const path = `posts/${folder}/${id}.json`;
@@ -79,7 +88,8 @@ export async function listPosts() {
   for (const f of files) {
     if (!f.download_url) continue;
     try {
-      const post = await fetch(f.download_url).then(r => r.json());
+      let post = await fetch(f.download_url).then(r => r.json());
+      post = normalizePost(post);
       out.push(post);
     } catch {}
   }
@@ -95,8 +105,8 @@ export async function addComment({ postId, userId, text }) {
   for (const f of files) {
     if (!f.name.startsWith(postId)) continue;
 
-    const post = await fetch(f.download_url).then(r => r.json());
-    post.comments ||= [];
+    let post = await fetch(f.download_url).then(r => r.json());
+    post = normalizePost(post);
 
     post.comments.push({
       userId,
@@ -129,14 +139,18 @@ export async function addPoint({ postId, userId }) {
   for (const f of files) {
     if (!f.name.startsWith(postId)) continue;
 
-    const post = await fetch(f.download_url).then(r => r.json());
-    post.points ||= [];
+    let post = await fetch(f.download_url).then(r => r.json());
+    post = normalizePost(post);
 
+    // prevent double voting
     if (post.points.some(p => p.userId === userId)) {
       return { ok: true, skipped: true };
     }
 
-    post.points.push({ userId, ts: Date.now() });
+    post.points.push({
+      userId,
+      ts: Date.now()
+    });
 
     await fetch(f.url, {
       method: "PUT",
