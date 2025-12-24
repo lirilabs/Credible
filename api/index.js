@@ -1,11 +1,14 @@
 import { allowCORS } from "./_lib/cors.js";
 import { isAdmin } from "./_lib/admin.js";
+
 import {
   createPost,
   listPosts,
   updatePost,
   deletePost
 } from "./_lib/github.js";
+
+import { addComment } from "./_lib/comments.js";
 import { publicPost, adminPost } from "./_lib/response.js";
 
 export default async function handler(req, res) {
@@ -14,7 +17,17 @@ export default async function handler(req, res) {
 
   try {
     const action = req.query?.action;
-    if (!action) return res.json({ status: "alive" });
+
+    /* ---------------- PING ---------------- */
+    if (!action || action === "ping") {
+      return res.json({
+        ok: true,
+        service: "credible",
+        time: new Date().toISOString()
+      });
+    }
+
+    /* ---------------- POSTS ---------------- */
 
     if (action === "post:list") {
       return res.json((await listPosts()).map(publicPost));
@@ -47,9 +60,27 @@ export default async function handler(req, res) {
       return res.json((await listPosts()).map(adminPost));
     }
 
+    /* ---------------- COMMENTS ---------------- */
+
+    if (action === "comment:add") {
+      /*
+        Expected body:
+        {
+          postId,
+          postOwnerId,
+          userId,
+          text
+        }
+      */
+      return res.json(await addComment(req.body));
+    }
+
+    /* ---------------- FALLBACK ---------------- */
+
     return res.status(404).json({ error: "Invalid action" });
+
   } catch (e) {
-    console.error(e);
+    console.error("API ERROR:", e);
     return res.status(500).json({ error: e.message });
   }
 }
