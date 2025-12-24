@@ -1,0 +1,31 @@
+import crypto from "crypto";
+import { ENV } from "./env.js";
+
+const ALGO = "aes-256-gcm";
+const KEY = crypto.createHash("sha256").update(ENV.SECRET_KEY).digest();
+
+export function encrypt(data) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ALGO, KEY, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(data), "utf8"),
+    cipher.final()
+  ]);
+  const tag = cipher.getAuthTag();
+
+  return Buffer.concat([iv, tag, encrypted]).toString("base64");
+}
+
+export function decrypt(payload) {
+  const buffer = Buffer.from(payload, "base64");
+  const iv = buffer.slice(0, 12);
+  const tag = buffer.slice(12, 28);
+  const content = buffer.slice(28);
+
+  const decipher = crypto.createDecipheriv(ALGO, KEY, iv);
+  decipher.setAuthTag(tag);
+
+  return JSON.parse(
+    Buffer.concat([decipher.update(content), decipher.final()]).toString("utf8")
+  );
+}
