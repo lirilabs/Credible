@@ -1,43 +1,97 @@
-import fetch from "node-fetch";
-import jwt from "jsonwebtoken";
-import { ENV } from "./env.js";
+import admin from "firebase-admin";
 
-export async function sendFCM(token, title, body) {
-  if (!ENV.FCM_PRIVATE_KEY) return;
-
-  const now = Math.floor(Date.now() / 1000);
-
-  const jwtToken = jwt.sign(
-    {
-      iss: ENV.FCM_CLIENT_EMAIL,
-      scope: "https://www.googleapis.com/auth/firebase.messaging",
-      aud: "https://oauth2.googleapis.com/token",
-      iat: now,
-      exp: now + 3600
-    },
-    ENV.FCM_PRIVATE_KEY,
-    { algorithm: "RS256" }
-  );
-
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwtToken}`
+/* ======================================================
+   Firebase Admin Init
+====================================================== */
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
   });
+}
 
-  const { access_token } = await res.json();
+/* ======================================================
+   FCM API
+====================================================== */
+export default async function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  await fetch(
-    `https://fcm.googleapis.com/v1/projects/${ENV.FCM_PROJECT_ID}/messages:send`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        message: { token, notification: { title, body } }
-      })
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Only POST allowed" });
+  }
+
+  try {
+    const {
+      token,
+      title,
+      body,
+      imageUrl,
+      clickAction,
+      data = {},
+    } = req.body || {};
+
+    if (!token || !title || !body) {
+      return res.status(400).json({
+        error: "token, title and body are required",
+      });
     }
-  );
+
+    const message = {
+      token,
+
+      notification: {
+        title,
+        body,
+        ...(imageUrl ? { image: imageUrl } : {}),
+      },
+
+      data: {
+        ...Object.fromEntries(
+          Object.entries(data).map(([k, v]) => [k, String(v)])
+        ),
+        ...(clickAction ? { click_action: clickAction } : {}),
+      },
+
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "default",
+          ...(imageUrl ? { imageUrl } : {}),
+        },
+      },
+
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            mutableContent: true,
+          },
+        },
+        fcmOptions: {
+          ...(imageUrl ? { image: imageUrl } : {}),
+        },
+      },
+    };
+
+    const messageId = await admin.messaging().send(message);
+
+    return res.status(200).json({
+      success: true,
+      messageId,
+    });
+  } catch (err) {
+    console.error("FCM ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
 }
