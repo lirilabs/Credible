@@ -2,8 +2,8 @@ import admin from "firebase-admin";
 import nodemailer from "nodemailer";
 
 /* ======================================================
-   Firebase Admin Initialization
-   ====================================================== */
+   Firebase Admin Init (ONCE)
+====================================================== */
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
@@ -16,7 +16,7 @@ if (!admin.apps.length) {
 
 /* ======================================================
    SMTP Transport
-   ====================================================== */
+====================================================== */
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
@@ -28,73 +28,36 @@ const transporter = nodemailer.createTransport({
 });
 
 /* ======================================================
-   Serverless Handler
-   ====================================================== */
-export default async function handler(req, res) {
-
-  /* -------------------- CORS (ALLOW ALL) -------------------- */
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Max-Age", "86400");
-
-  // Handle preflight request
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
+   INTERNAL MAIL SENDER
+====================================================== */
+export async function sendMail({
+  to,
+  subject,
+  text,
+  html,
+  idToken, // Firebase Auth ID token
+}) {
+  if (!to || !subject || (!text && !html)) {
+    throw new Error("to, subject and text or html are required");
   }
 
-  // Allow only POST
-  if (req.method !== "POST") {
-    return res.status(405).json({
-      error: "Only POST method is allowed",
-    });
+  if (!idToken) {
+    throw new Error("Missing Firebase ID token");
   }
 
-  try {
-    /* -------------------- AUTH -------------------- */
-    const authHeader = req.headers.authorization;
+  // Verify user
+  const decoded = await admin.auth().verifyIdToken(idToken);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        error: "Missing or invalid Authorization header",
-      });
-    }
+  await transporter.sendMail({
+    from: `"Credible" <${process.env.SMTP_EMAIL}>`,
+    to,
+    subject,
+    text,
+    html,
+  });
 
-    const idToken = authHeader.split("Bearer ")[1];
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-
-    /* -------------------- INPUT -------------------- */
-    const { to, subject, text, html } = req.body || {};
-
-    if (!to || !subject || (!text && !html)) {
-      return res.status(400).json({
-        error: "Required fields: to, subject, text or html",
-      });
-    }
-
-    /* -------------------- SEND EMAIL -------------------- */
-    await transporter.sendMail({
-      from: `"Hive SMTP" <${process.env.SMTP_EMAIL}>`,
-      to,
-      subject,
-      text,
-      html,
-    });
-
-    /* -------------------- SUCCESS -------------------- */
-    return res.status(200).json({
-      success: true,
-      uid: decodedToken.uid,
-      message: "Email sent successfully",
-    });
-
-  } catch (error) {
-    console.error("SMTP API Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      details: error.message,
-    });
-  }
+  return {
+    success: true,
+    uid: decoded.uid,
+  };
 }
