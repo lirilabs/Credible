@@ -5,7 +5,7 @@ import {
   createPost,
   listPosts,
   updatePost,
-  deletePost
+  deletePost,
 } from "./_lib/github.js";
 
 import { publicPost, adminPost } from "./_lib/response.js";
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     const action = req.query?.action;
     if (!action) return res.json({ status: "alive" });
 
-    /* ---------------- POSTS ---------------- */
+    /* ---------- POSTS ---------- */
 
     if (action === "post:list") {
       return res.json((await listPosts()).map(publicPost));
@@ -29,14 +29,11 @@ export default async function handler(req, res) {
     if (action === "post:create") {
       const result = await createPost(req.body);
 
-      // 🔔 Optional FCM notify on new post
       if (req.body.fcmToken) {
         await sendFCM({
           token: req.body.fcmToken,
-          notification: {
-            title: "New post created",
-            body: "Your content is now live"
-          }
+          title: "Post created",
+          body: "Your post is live now",
         });
       }
 
@@ -45,19 +42,13 @@ export default async function handler(req, res) {
 
     if (action === "post:update") {
       return res.json(
-        await updatePost({
-          ...req.body,
-          isAdmin: isAdmin(req)
-        })
+        await updatePost({ ...req.body, isAdmin: isAdmin(req) })
       );
     }
 
     if (action === "post:delete") {
       return res.json(
-        await deletePost({
-          ...req.body,
-          isAdmin: isAdmin(req)
-        })
+        await deletePost({ ...req.body, isAdmin: isAdmin(req) })
       );
     }
 
@@ -66,18 +57,16 @@ export default async function handler(req, res) {
       return res.json((await listPosts()).map(adminPost));
     }
 
-    /* ---------------- NOTIFICATIONS ---------------- */
+    /* ---------- NOTIFICATIONS ---------- */
 
     if (action === "notify:fcm") {
       if (!isAdmin(req)) throw new Error("Unauthorized");
-
       const messageId = await sendFCM(req.body);
       return res.json({ success: true, messageId });
     }
 
     if (action === "notify:mail") {
       if (!isAdmin(req)) throw new Error("Unauthorized");
-
       await sendMail(req.body);
       return res.json({ success: true });
     }
@@ -85,7 +74,7 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: "Invalid action" });
 
   } catch (e) {
-    console.error(e);
+    console.error("API ERROR:", e);
     return res.status(500).json({ error: e.message });
   }
 }
