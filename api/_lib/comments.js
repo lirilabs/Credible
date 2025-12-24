@@ -1,110 +1,55 @@
 import crypto from "crypto";
+import fetch from "node-fetch";
 import { ENV } from "./env.js";
 
-/* ---------------- HELPERS ---------------- */
+export async function addComment({ postId, userId, text }) {
+  if (!postId || !userId || !text) throw new Error("Invalid input");
 
-const GH = "https://api.github.com";
+  const postFile = await findPost(postId);
+  postFile.post.comments ||= [];
 
-const headers = () => ({
-  Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
-  Accept: "application/vnd.github+json",
-  "Content-Type": "application/json",
-});
-
-const toBase64 = obj =>
-  Buffer.from(JSON.stringify(obj, null, 2)).toString("base64");
-
-const yearMonth = ts => {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${d.getMonth() + 1}`;
-};
-
-/* ---------------- ADD COMMENT ---------------- */
-
-export async function addComment({
-  postId,
-  postOwnerId,
-  userId,
-  text,
-}) {
-  if (!postId || !userId || !text) {
-    throw new Error("postId, userId and text are required");
-  }
-
-  const ts = Date.now();
-  const id = crypto.randomUUID();
-
-  const comment = {
-    id,
-    postId,
+  postFile.post.comments.push({
+    id: crypto.randomUUID(),
     userId,
     text,
-    ts,
-  };
+    ts: Date.now()
+  });
 
-  const folder = yearMonth(ts);
-  const path = `comments/${postId}/${folder}/${id}.json`;
-
-  const res = await fetch(
-    `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: `comment ${id}`,
-        content: toBase64(comment),
-        branch: ENV.GITHUB_BRANCH,
-      }),
-    }
-  );
-
-  if (!res.ok) throw new Error("Comment create failed");
-
-  /* ---------------- POINT SYSTEM ----------------
-     +2 points for post owner when someone comments
-  ------------------------------------------------ */
-  if (postOwnerId && postOwnerId !== userId) {
-    await addPoints(postOwnerId, 2);
-  }
-
-  return { ok: true, id };
+  await savePost(postFile);
+  return { ok: true };
 }
 
-/* ---------------- POINT STORAGE ---------------- */
+/* helpers */
+async function findPost(id) {
+  const root = await fetch(
+    `https://api.github.com/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/posts?ref=${ENV.GITHUB_BRANCH}`,
+    { headers: { Authorization: `Bearer ${ENV.GITHUB_TOKEN}` } }
+  ).then(r => r.json());
 
-async function addPoints(userId, delta) {
-  const path = `points/${userId}.json`;
-
-  // Try to read existing
-  let current = { userId, points: 0 };
-
-  try {
-    const res = await fetch(
-      `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}?ref=${ENV.GITHUB_BRANCH}`,
-      { headers: headers() }
-    );
-
-    if (res.ok) {
-      const json = await res.json();
-      current = JSON.parse(
-        Buffer.from(json.content, "base64").toString()
-      );
+  for (const dir of root) {
+    const files = await fetch(dir.url).then(r => r.json());
+    for (const f of files) {
+      if (f.name.startsWith(id)) {
+        const post = await fetch(f.download_url).then(r => r.json());
+        return { post, file: f };
+      }
     }
-  } catch {}
+  }
+  throw new Error("Post not found");
+}
 
-  current.points += delta;
-  current.updatedAt = Date.now();
-
-  await fetch(
-    `${GH}/repos/${ENV.GITHUB_OWNER}/${ENV.GITHUB_REPO}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify({
-        message: `points update ${userId}`,
-        content: toBase64(current),
-        branch: ENV.GITHUB_BRANCH,
-      }),
-    }
-  );
+async function savePost({ post, file }) {
+  await fetch(file.url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${ENV.GITHUB_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: "comment added",
+      content: Buffer.from(JSON.stringify(post)).toString("base64"),
+      sha: file.sha,
+      branch: ENV.GITHUB_BRANCH
+    })
+  });
 }
