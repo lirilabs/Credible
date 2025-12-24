@@ -3,12 +3,10 @@ export function publicPost(p) {
     id: p.id,
     userId: p.userId,
     text: p.text,
-    tags: p.tags,
-    image: p.image,
+    image: p.image || null,
+    tags: p.tags || [],
     ts: p.ts,
+    comments: p.comments || [],
+    points: p.points || []
   };
-}
-
-export function adminPost(p) {
-  return p;
 }
