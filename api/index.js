@@ -8,36 +8,61 @@ import {
   deletePost
 } from "./_lib/github.js";
 
-import { addComment } from "./_lib/comments.js";
 import { publicPost, adminPost } from "./_lib/response.js";
+import { addPoint } from "./_lib/points.js";
+
+/* ======================================================
+   MAIN SERVERLESS HANDLER
+====================================================== */
 
 export default async function handler(req, res) {
+  // Enable CORS for all requests
   allowCORS(req, res);
-  if (req.method === "OPTIONS") return res.end();
+
+  // Preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   try {
-    const action = req.query?.action;
+    const action = String(req.query?.action || "");
 
-    /* ---------------- PING ---------------- */
+    /* ======================================================
+       HEALTH / PING
+    ====================================================== */
+
     if (!action || action === "ping") {
       return res.json({
-        ok: true,
-        service: "credible",
-        time: new Date().toISOString()
+        status: "alive",
+        ts: Date.now()
       });
     }
 
-    /* ---------------- POSTS ---------------- */
+    /* ======================================================
+       POSTS
+    ====================================================== */
 
+    // Public feed
     if (action === "post:list") {
-      return res.json((await listPosts()).map(publicPost));
+      const posts = await listPosts();
+      return res.json(posts.map(publicPost));
     }
 
+    // Create post
     if (action === "post:create") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       return res.json(await createPost(req.body));
     }
 
+    // Update post (owner or admin)
     if (action === "post:update") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       return res.json(
         await updatePost({
           ...req.body,
@@ -46,7 +71,12 @@ export default async function handler(req, res) {
       );
     }
 
+    // Delete post (owner or admin)
     if (action === "post:delete") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       return res.json(
         await deletePost({
           ...req.body,
@@ -55,32 +85,51 @@ export default async function handler(req, res) {
       );
     }
 
+    // Admin-only full data
     if (action === "admin:posts") {
-      if (!isAdmin(req)) throw new Error("Unauthorized");
-      return res.json((await listPosts()).map(adminPost));
+      if (!isAdmin(req)) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const posts = await listPosts();
+      return res.json(posts.map(adminPost));
     }
 
-    /* ---------------- COMMENTS ---------------- */
+    /* ======================================================
+       POINT SYSTEM (UPVOTE)
+    ====================================================== */
 
-    if (action === "comment:add") {
+    if (action === "point:add") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "POST required" });
+      }
+
       /*
-        Expected body:
+        Required body:
         {
           postId,
           postOwnerId,
-          userId,
-          text
+          userId
         }
       */
-      return res.json(await addComment(req.body));
+
+      return res.json(await addPoint(req.body));
     }
 
-    /* ---------------- FALLBACK ---------------- */
+    /* ======================================================
+       UNKNOWN ACTION
+    ====================================================== */
 
-    return res.status(404).json({ error: "Invalid action" });
+    return res.status(404).json({
+      error: "Invalid action",
+      action
+    });
 
-  } catch (e) {
-    console.error("API ERROR:", e);
-    return res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("API ERROR:", err);
+
+    return res.status(500).json({
+      error: err.message || "Internal Server Error"
+    });
   }
 }
